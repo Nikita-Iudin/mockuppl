@@ -1,0 +1,1609 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frila Mockup Plugin</title>
+<style>
+:root{color-scheme:dark;font:13px Inter,Arial,sans-serif;color:#eee;background:#242424}
+*{box-sizing:border-box}body{margin:0;padding:16px}h1{font-size:19px;margin:0}h2,summary{font-size:13px;font-weight:600;margin:0 0 8px}
+p{font-size:12px;line-height:1.45;color:#bdbdbd;margin:8px 0}button,select,input{font:inherit}
+button{border:0;border-radius:6px;padding:8px 10px;background:#147acc;color:#fff;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}.secondary{background:#444}.panel{padding:12px;background:#303030;border-radius:8px;margin:12px 0}
+.actions{display:flex;gap:8px;flex-wrap:wrap}label{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0}
+input[type=file]{width:100%}input[type=range]{width:135px}#status{color:#b6dfff;min-height:18px}#frameName{color:#acf2bc}
+#templateName,#templateSelect{flex:1;min-width:0;max-width:100%;padding:6px}
+#templateStatus{min-height:18px;overflow-wrap:anywhere}
+canvas{display:block;background:#181818;border-radius:6px}#stage{width:100%;height:auto;margin:8px auto;touch-action:none;cursor:crosshair}
+.cornerEditor{margin:10px 0 14px;padding:10px;background:#252525;border-radius:8px}
+.cornerGrid{display:grid;grid-template-columns:minmax(0,192px) minmax(0,1fr);align-items:start;gap:12px}
+#cornerView{width:100%;max-width:192px;height:auto;touch-action:none;cursor:crosshair}
+.cornerButtons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.cornerButtons button{padding:5px 4px;min-height:32px;color:var(--corner);font-size:17px;line-height:1}
+.cornerButtons button[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--corner);background:#151515}
+:focus-visible{outline:2px solid #b6dfff;outline-offset:2px}
+@media(max-width:360px){.cornerGrid{grid-template-columns:1fr}}
+#cropPreview{width:100%;max-width:420px;height:auto;margin:auto}#detailPreview{max-width:none}
+summary{cursor:pointer}.pixels{overflow:auto;max-height:190px;background:#181818}#diagnostics{margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace}
+</style>
+</head>
+<body>
+<h1>Frila Mockup Plugin</h1>
+<section class="panel">
+  <h2>Фотография устройства</h2>
+  <input type="file" id="photo" accept="image/png,image/jpeg,image/webp" aria-label="Загрузить фото с компьютера">
+  <div class="actions" style="margin-top:8px">
+    <button id="photoFromFigma" class="secondary" disabled>Взять фото из Figma</button>
+  </div>
+  <p id="photoName" role="status">Выделите в Figma слой с фото или загрузите файл с компьютера.</p>
+  <div class="actions" style="margin-top:8px">
+    <button id="detect" class="secondary" disabled>Найти экран</button>
+    <button id="editPoints" class="secondary" aria-controls="cornerEditor" aria-expanded="false" disabled>Точная настройка углов</button>
+    <button id="traceMask" class="secondary" disabled>Обвести маску экрана</button>
+    <button id="clearMask" class="secondary" hidden>Убрать маску</button>
+  </div>
+  <div id="maskControls" hidden>
+    <p>Идите по внутренней кромке в одном направлении. Для закруглённого экрана начните с 3–4 точек на каждый угол. Снимите «Показывать дизайн», чтобы рассмотреть исходный экран.</p>
+    <div class="actions">
+      <button id="applyMask" disabled>Применить маску</button>
+      <button id="saveMaskPNG" class="secondary" disabled>Применить и сохранить PNG</button>
+      <button id="undoMaskPoint" class="secondary" disabled>Убрать последнюю точку</button>
+      <button id="cancelMask" class="secondary">Отмена</button>
+    </div>
+    <p id="maskStatus" role="status"></p>
+  </div>
+  <p>Поставьте точки на пересечениях прямых кромок дисплея.</p>
+  <canvas id="stage" width="420" height="230" aria-label="Фото с углами экрана"></canvas>
+  <div id="cornerEditor" class="cornerEditor" hidden>
+    <div class="cornerGrid">
+      <canvas id="cornerView" width="192" height="144" tabindex="0" aria-label="Увеличенный фрагмент угла" aria-describedby="cornerHelp"></canvas>
+      <div>
+        <div class="cornerButtons" role="group" aria-label="Выбор угла">
+          <button id="corner0" class="secondary" aria-label="Верхний левый угол" aria-pressed="true">↖</button>
+          <button id="corner1" class="secondary" aria-label="Верхний правый угол" aria-pressed="false">↗</button>
+          <button id="corner3" class="secondary" aria-label="Нижний левый угол" aria-pressed="false">↙</button>
+          <button id="corner2" class="secondary" aria-label="Нижний правый угол" aria-pressed="false">↘</button>
+        </div>
+        <label>Увеличение угла <select id="cornerZoom"><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option></select></label>
+        <label><input id="livePreview" type="checkbox" checked disabled>Показывать дизайн</label>
+        <p id="cornerHelp">Выберите угол и нажмите на пересечение кромок. Стрелки сдвигают точку на ¼ px, с Shift — на 5 px.</p>
+      </div>
+    </div>
+  </div>
+  <label>Пропорции экрана <select id="aspect"><option value="auto">По контуру</option><option value="1.6">16:10</option><option value="1.7777777777777777">16:9</option><option value="1.5">3:2</option><option value="1.3333333333333333">4:3</option></select></label>
+  <label>Отступ от рамки <input type="range" id="inset" min="0" max="3" step="0.2" value="0.8"><output id="insetVal">0.8%</output></label>
+  <label>Скругление экрана <input type="range" id="roundness" min="0" max="25" step="0.25" value="0"><output id="roundnessVal">0%</output></label>
+</section>
+<details class="panel" id="templatesPanel">
+  <summary>Шаблоны мокапов</summary>
+  <label>Шаблон <select id="templateSelect" disabled><option value="">Нет сохранённых шаблонов</option></select></label>
+  <div class="actions">
+    <button id="openTemplate" class="secondary" disabled>Открыть</button>
+    <button id="updateTemplate" class="secondary" disabled>Перезаписать</button>
+    <button id="removeTemplate" class="secondary" disabled>Удалить</button>
+  </div>
+  <div id="templateDelete" hidden>
+    <p id="templateDeleteText"></p>
+    <div class="actions">
+      <button id="confirmTemplateDelete" class="secondary">Удалить шаблон</button>
+      <button id="cancelTemplateDelete" class="secondary">Отмена</button>
+    </div>
+  </div>
+  <label>Название нового шаблона <input id="templateName" type="text" maxlength="80" disabled></label>
+  <button id="saveTemplate" disabled>Сохранить</button>
+  <p id="templateStatus" role="status">Шаблоны сохраняются на этом устройстве.</p>
+</details>
+<section class="panel">
+  <h2>Фрейм Figma</h2>
+  <div class="actions"><button id="loadFrame" class="secondary">Загрузить выбранный фрейм</button></div>
+  <p id="frameName">Выделите фрейм сайта в Figma.</p>
+  <label>Масштаб экспорта фрейма <select id="quality"><option value="1">1×</option><option value="2">2×</option><option value="3" selected>3×</option></select></label>
+  <label>Прокрутка страницы <input type="range" id="scroll" min="0" max="100" step="0.1" value="0"><output id="scrollVal">0%</output></label>
+  <label>Приближение дизайна <input type="range" id="zoom" min="100" max="200" step="5" value="100"><output id="zoomVal">100%</output></label>
+  <p id="cropInfo"></p>
+  <canvas id="cropPreview" width="420" height="150" aria-label="Видимый участок страницы"></canvas>
+</section>
+<section class="panel">
+  <h2>Мокап</h2>
+  <label>Рендерер <select id="engine"><option value="webgl">WebGL 2</option><option value="cpu">Canvas</option></select></label>
+  <label>Разрешение мокапа <select id="outputScale">
+    <option value="auto" selected>Авто · для чёткого экрана</option>
+    <option value="1">1× · размер фото</option>
+    <option value="2">2×</option>
+    <option value="3">3×</option>
+    <option value="4">4×</option>
+  </select></label>
+  <div class="actions">
+    <button id="render" disabled>Создать мокап</button>
+    <button id="save" class="secondary" disabled>Сохранить PNG</button>
+    <button id="insert" class="secondary" disabled>Вставить в Figma</button>
+    <button id="update" class="secondary" disabled>Обновить мокап</button>
+  </div>
+  <p id="status" role="status">Загрузите фотографию и фрейм.</p>
+</section>
+<details class="panel" open>
+  <summary>Диагностика</summary>
+  <pre id="diagnostics"></pre>
+  <div class="actions">
+    <button id="saveA" class="secondary" disabled>A · экспорт Figma</button>
+    <button id="saveB" class="secondary" disabled>B · область сайта</button>
+    <button id="saveC" class="secondary" disabled>C · мокап</button>
+    <button id="saveScreen" class="secondary" disabled>Экран из C</button>
+    <button id="compare" class="secondary" disabled>Сравнить Canvas и WebGL</button>
+    <button id="saveCpu" class="secondary" disabled>C · Canvas</button>
+    <button id="saveGpu" class="secondary" disabled>C · WebGL</button>
+  </div>
+  <p>Для сравнения откройте PNG в масштабе 100%. «Экран из C» сохраняет прямоугольник вокруг дисплея в пикселях готового мокапа.</p>
+  <label>Просмотр 100% <select id="detailSource"><option value="a">A · фрейм</option><option value="b">B · область сайта</option><option value="c">C · экран в мокапе</option></select></label>
+  <label>По горизонтали <input type="range" id="detailX" min="0" max="100" value="0"></label>
+  <label>По вертикали <input type="range" id="detailY" min="0" max="100" value="0"></label>
+  <div class="pixels"><canvas id="detailPreview" width="1" height="1" aria-label="Фрагмент PNG в масштабе 100 процентов"></canvas></div>
+</details>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const stageContext = stage.getContext('2d');
+const cornerView = $('cornerView');
+const cornerContext = cornerView.getContext('2d');
+const cornerColors = ['#ffcc00', '#ff6289', '#54b9ff', '#8dfc7d'];
+const cornerButtons = cornerColors.map((color, index) => {
+  const button = $('corner' + index);
+  button.style.setProperty('--corner', color);
+  return button;
+});
+const selection = { nodeId: null, requestId: 0, pending: false, timer: null };
+let photo, frame, points, output, comparison, linkedMockupId;
+let editingCorners = false, activeCorner = 0, stageDrag, cornerDrag;
+let screenMask, maskDraft;
+let stagePaintPending = false, previewSource;
+let revision = 0, photoRequest = 0, operation, writeRequestId = 0, gpuInfo = {}, comparingSetting = null;
+let selectedPhotoId, loadingPhoto, photoBlob;
+let templateNames = [], templatePending, templateDeleteName, templateRequestId = 0;
+const status = message => { $('status').textContent = message; };
+const send = pluginMessage => parent.postMessage({ pluginMessage }, '*');
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+function imageFromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(blob);
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(Error('Не удалось декодировать изображение.')); };
+    image.src = url;
+  });
+}
+
+const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function screenSize(corners) {
+  return {
+    width: (distance(corners[0], corners[1]) + distance(corners[3], corners[2])) / 2,
+    height: (distance(corners[0], corners[3]) + distance(corners[1], corners[2])) / 2,
+  };
+}
+
+function outputScale(photo, corners, mode) {
+  if (mode !== 'auto') return Number(mode);
+  const targetScale = Math.ceil(1000 / Math.max(1, screenSize(corners).width));
+  const pixelBudgetScale = Math.sqrt(32_000_000 / (photo.naturalWidth * photo.naturalHeight));
+  return Math.max(1, Math.min(4, targetScale, pixelBudgetScale));
+}
+
+function cropSpec(image, corners, aspect, zoom, scroll) {
+  const screen = corners && screenSize(corners);
+  const ratio = aspect === 'auto' ? (screen ? clamp(screen.width / Math.max(1, screen.height), .4, 4) : 1.6) : Number(aspect);
+  const width = Math.min(image.naturalWidth, image.naturalHeight * ratio) / zoom;
+  const height = width / ratio;
+  return {
+    sx: (image.naturalWidth - width) / 2, sy: (image.naturalHeight - height) * scroll,
+    sw: width, sh: height,
+  };
+}
+
+function activeCrop() {
+  return frame && cropSpec(frame.image, points, $('aspect').value, Number($('zoom').value) / 100, Number($('scroll').value) / 100);
+}
+
+function pixelBounds(spec) {
+  const x = Math.floor(spec.sx + 1e-8), y = Math.floor(spec.sy + 1e-8);
+  return { x, y, width: Math.ceil(spec.sx + spec.sw - 1e-8) - x, height: Math.ceil(spec.sy + spec.sh - 1e-8) - y };
+}
+
+function makeCanvas(width, height) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+function pixelCopy(image, { x, y, width, height }) {
+  const canvas = makeCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw Error('Не удалось создать Canvas для области изображения.');
+  ctx.drawImage(image, x, y, width, height, 0, 0, width, height);
+  return canvas;
+}
+
+function drawStage() {
+  $('cornerEditor').hidden = !editingCorners;
+  $('editPoints').setAttribute('aria-expanded', String(editingCorners));
+  $('editPoints').textContent = editingCorners ? 'Скрыть точную настройку' : 'Точная настройка углов';
+  $('cornerHelp').textContent = maskDraft
+    ? 'Кнопки с углами перемещают лупу. Нажмите в лупе, чтобы добавить точку на кромке.'
+    : 'Выберите угол и нажмите на пересечение кромок. Стрелки сдвигают точку на ¼ px, с Shift — на 5 px.';
+  if (stagePaintPending) return;
+  stagePaintPending = true;
+  requestAnimationFrame(() => {
+    stagePaintPending = false;
+    paintStage();
+  });
+}
+
+function paintStage() {
+  const source = editingCorners && frame && $('livePreview').checked ? livePreviewSource() : null;
+  if (editingCorners) drawCornerView(source);
+  const ctx = stageContext;
+  ctx.clearRect(0, 0, stage.width, stage.height);
+  if (!photo) return;
+  if (output && !editingCorners) {
+    ctx.drawImage(output.canvas, 0, 0, stage.width, stage.height);
+    return;
+  }
+  ctx.drawImage(photo, 0, 0, stage.width, stage.height);
+  if (!points) return;
+  const mapToStage = point => ({ x: point.x * stage.width / photo.naturalWidth, y: point.y * stage.height / photo.naturalHeight });
+  const stagePoints = points.map(mapToStage);
+  if (source) drawLiveOverlay(ctx, stagePoints, source, screenMask?.map(mapToStage));
+  if (maskDraft || (screenMask && !source)) drawMaskGuide(ctx, (maskDraft ?? screenMask).map(mapToStage), !maskDraft);
+  else if (!screenMask) {
+    tracePolygon(ctx, stagePoints);
+    ctx.strokeStyle = '#12f2ad';
+    ctx.lineWidth = Math.max(2, stage.width / 350);
+    ctx.stroke();
+  }
+  stagePoints.forEach(({ x, y }, i) => {
+    const selected = editingCorners && i === activeCorner;
+    ctx.beginPath();
+    ctx.arc(x, y, selected ? 8 : 5, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.strokeStyle = cornerColors[i];
+    ctx.lineWidth = selected ? 2.5 : 1.5;
+    ctx.stroke();
+  });
+}
+
+function cornerViewport() {
+  const point = points[activeCorner];
+  const scale = Number($('cornerZoom').value);
+  return { x: point.x - cornerView.width / (2 * scale), y: point.y - cornerView.height / (2 * scale), scale };
+}
+
+function drawCornerView(source) {
+  const { x, y, scale } = cornerDrag?.view ?? cornerViewport();
+  const point = points[activeCorner];
+  const ctx = cornerContext;
+  ctx.clearRect(0, 0, cornerView.width, cornerView.height);
+  ctx.imageSmoothingEnabled = false;
+  const left = Math.max(0, x), top = Math.max(0, y);
+  const width = Math.min(photo.naturalWidth, x + cornerView.width / scale) - left;
+  const height = Math.min(photo.naturalHeight, y + cornerView.height / scale) - top;
+  ctx.drawImage(photo, left, top, width, height, (left - x) * scale, (top - y) * scale, width * scale, height * scale);
+  const mapToLoupe = point => ({ x: (point.x - x) * scale, y: (point.y - y) * scale });
+  if (source) drawLiveOverlay(ctx, points.map(mapToLoupe), source, screenMask?.map(mapToLoupe));
+  if (maskDraft) drawMaskGuide(ctx, maskDraft.map(mapToLoupe));
+  const px = (point.x - x) * scale, py = (point.y - y) * scale;
+  ctx.beginPath();
+  ctx.moveTo(px - 16, py); ctx.lineTo(px - 4, py);
+  ctx.moveTo(px + 4, py); ctx.lineTo(px + 16, py);
+  ctx.moveTo(px, py - 16); ctx.lineTo(px, py - 4);
+  ctx.moveTo(px, py + 4); ctx.lineTo(px, py + 16);
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.strokeStyle = cornerColors[activeCorner];
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  cornerButtons.forEach((button, index) => button.setAttribute('aria-pressed', String(index === activeCorner)));
+}
+
+function tracePolygon(ctx, vertices, closed = true) {
+  ctx.beginPath();
+  vertices.forEach(({ x, y }, index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  if (closed) ctx.closePath();
+}
+
+function drawMaskGuide(ctx, vertices, closed = false) {
+  if (!vertices.length) return;
+  tracePolygon(ctx, vertices, closed);
+  ctx.strokeStyle = '#ffd35a';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.beginPath();
+  for (const { x, y } of vertices) {
+    ctx.moveTo(x + 2, y);
+    ctx.arc(x, y, 2, 0, 2 * Math.PI);
+  }
+  ctx.stroke();
+}
+
+function livePreviewSource() {
+  const spec = activeCrop();
+  const { sx, sy, sw, sh } = spec;
+  if (previewSource?.image === frame.image && Object.keys(spec).every(key => spec[key] === previewSource.spec[key])) {
+    return previewSource;
+  }
+  const scale = Math.min(1, 512 / Math.max(sw, sh));
+  const width = Math.max(1, Math.round(sw * scale)), height = Math.max(1, Math.round(sh * scale));
+  const canvas = makeCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'medium';
+  ctx.drawImage(frame.image, sx, sy, sw, sh, 0, 0, width, height);
+  previewSource = { canvas, image: frame.image, spec, rect: [0, 0, width, height] };
+  return previewSource;
+}
+
+function drawLiveOverlay(ctx, corners, source, mask) {
+  let geometry;
+  try {
+    geometry = geometryForCorners(ctx.canvas.width, ctx.canvas.height, corners, Number($('inset').value) / 100, mask);
+  } catch (_) {
+    // Пока углы пересекаются, оставляем фото и маркеры для корректировки.
+    return;
+  }
+  if (geometry) renderCPU(ctx, geometry, source, screenCornerRadii(source.spec, Number($('roundness').value) / 100));
+}
+
+function drawCrop() {
+  const preview = $('cropPreview'), ctx = preview.getContext('2d');
+  ctx.clearRect(0, 0, preview.width, preview.height);
+  const spec = activeCrop();
+  if (spec) {
+    const { sx, sy, sw, sh } = spec;
+    const scale = Math.min(preview.width / sw, preview.height / sh);
+    const width = sw * scale, height = sh * scale;
+    ctx.drawImage(frame.image, sx, sy, sw, sh, (preview.width - width) / 2, (preview.height - height) / 2, width, height);
+  }
+  $('cropInfo').textContent = spec ? `Область ${size(spec.sw, spec.sh)} px, смещение сверху ${Math.round(spec.sy)} px.` : '';
+}
+
+function drawDetail() {
+  const canvas = $('detailPreview'), mode = $('detailSource').value;
+  let image, bounds;
+  if (mode === 'c' && output) {
+    image = output.canvas;
+    bounds = output.geometry.screenBounds;
+  } else if (mode !== 'c' && frame) {
+    image = frame.image;
+    bounds = mode === 'b' ? pixelBounds(activeCrop()) : { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight };
+  }
+  const dpr = window.devicePixelRatio || 1;
+  const available = canvas.parentElement.clientWidth || 400;
+  canvas.width = bounds ? Math.max(1, Math.min(bounds.width, Math.floor(available * dpr))) : 1;
+  canvas.height = bounds ? Math.min(bounds.height, Math.floor(150 * dpr)) : 1;
+  canvas.style.width = `${canvas.width / dpr}px`;
+  canvas.style.height = `${canvas.height / dpr}px`;
+  if (!image) return;
+  const x = bounds.x + Math.round((bounds.width - canvas.width) * Number($('detailX').value) / 100);
+  const y = bounds.y + Math.round((bounds.height - canvas.height) * Number($('detailY').value) / 100);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(image, x, y, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+}
+
+function size(width, height) { return `${Math.round(width)} × ${Math.round(height)}`; }
+function diagnostics() {
+  const lines = [];
+  if (frame) {
+    lines.push(`Фрейм: ${frame.name} (${frame.nodeId}), ${frame.width} × ${frame.height} ед. Figma`);
+    lines.push(`Масштаб Figma: запрошен ${frame.requested}×, передан в exportAsync ${Number(frame.scale.toFixed(4))}×${frame.scale < frame.requested ? ' · ограничен до 12 000 px по длинной стороне' : ''}`);
+    lines.push(`A · PNG: ${size(frame.image.naturalWidth, frame.image.naturalHeight)} px, ${frame.blob.size.toLocaleString('ru-RU')} байт`);
+    lines.push(`Плотность A: ${(frame.image.naturalWidth / frame.width).toFixed(3)} × ${(frame.image.naturalHeight / frame.height).toFixed(3)} px на единицу Figma`);
+    const spec = activeCrop(), pixels = pixelBounds(spec);
+    lines.push(`Область: x ${spec.sx.toFixed(2)}, y ${spec.sy.toFixed(2)}, ${spec.sw.toFixed(2)} × ${spec.sh.toFixed(2)} px`);
+    lines.push(`B · Canvas: ${size(pixels.width, pixels.height)} px, копия исходных пикселей`);
+  }
+  if (photo) lines.push(`Фото: ${size(photo.naturalWidth, photo.naturalHeight)} px`);
+  if (points) {
+    const screen = screenSize(points);
+    const mode = $('outputScale').value;
+    const scale = outputScale(photo, points, mode);
+    lines.push(`Дисплей на фото: ≈ ${size(screen.width, screen.height)} px (средние длины сторон)`);
+    lines.push(`Запрошено для C: ${size(photo.naturalWidth * scale, photo.naturalHeight * scale)} px · ${mode === 'auto' ? 'Авто ' : ''}${Number(scale.toFixed(2))}×`);
+  }
+  if (maskDraft) lines.push(`Черновик маски: ${maskDraft.length} точек`);
+  if (screenMask) lines.push(`Применённая маска: ${screenMask.length} точек`);
+  if (output) {
+    const projected = screenSize(output.geometry.screenCorners);
+    lines.push(`C · PNG: ${size(output.canvas.width, output.canvas.height)} px · ${output.engine === 'cpu' ? 'Canvas' : 'WebGL 2'}${output.reduced ? ' · уменьшен из-за лимита Canvas' : ''}`);
+    lines.push(`Дисплей на C после отступа: ≈ ${size(projected.width, projected.height)} px`);
+    if (output.geometry.mask) {
+      const { width, height } = output.geometry.screenBounds;
+      lines.push(`Границы маски на C: ${size(width, height)} px`);
+    }
+    lines.push(`Буфер рендера: ${size(output.staging.width, output.staging.height)} px (1:1)`);
+  }
+  if (comparison) lines.push(`Сравнение: ${size(comparison.width, comparison.height)} px`);
+  if (comparingSetting) lines.push(`Сравнение: ${comparingSetting}`);
+  lines.push(`Выбран: ${$('engine').value === 'cpu' ? 'Canvas' : 'WebGL 2'}`);
+  if (gpuInfo.maxTexture) lines.push(`WebGL 2: MAX_TEXTURE_SIZE ${gpuInfo.maxTexture} · MAX_RENDERBUFFER_SIZE ${gpuInfo.maxBuffer} · MAX_VIEWPORT_DIMS ${gpuInfo.viewport.join(' × ')}`);
+  else if (!gpuInfo.error) lines.push('Лимиты WebGL появятся после запуска рендера.');
+  if (gpuInfo.error) lines.push(`WebGL 2: ${gpuInfo.error}`);
+  $('diagnostics').textContent = lines.join('\n');
+}
+
+function syncButtons() {
+  const tracingMask = Boolean(maskDraft);
+  const busy = Boolean(operation || selection.pending || loadingPhoto);
+  const canRender = Boolean(photo && frame && !busy);
+  $('render').disabled = $('compare').disabled = !canRender;
+  $('detect').disabled = $('editPoints').disabled = !photo || tracingMask;
+  $('traceMask').disabled = !photo || Boolean(operation || loadingPhoto) || tracingMask;
+  $('traceMask').textContent = screenMask ? 'Обвести маску заново' : 'Обвести маску экрана';
+  $('clearMask').hidden = !screenMask || tracingMask;
+  $('clearMask').disabled = Boolean(operation || loadingPhoto);
+  $('maskControls').hidden = !tracingMask;
+  $('applyMask').disabled = (maskDraft?.length ?? 0) < 3;
+  $('saveMaskPNG').disabled = !canRender || $('applyMask').disabled;
+  $('undoMaskPoint').disabled = !maskDraft?.length;
+  $('roundness').disabled = Boolean(screenMask) || tracingMask;
+  $('photo').disabled = Boolean(operation) || tracingMask;
+  $('photoFromFigma').disabled = Boolean(operation) || tracingMask || !selectedPhotoId || loadingPhoto?.nodeId === selectedPhotoId;
+  $('livePreview').disabled = !photo || !frame;
+  $('insert').disabled = !output || busy || tracingMask;
+  $('update').disabled = !canRender || !linkedMockupId;
+  $('loadFrame').disabled = $('quality').disabled = Boolean(operation);
+  $('save').disabled = !canRender && (!output || tracingMask);
+  $('saveC').disabled = $('saveScreen').disabled = !output || tracingMask;
+  $('saveA').disabled = $('saveB').disabled = !frame || selection.pending;
+  $('saveCpu').disabled = !comparison || tracingMask;
+  $('saveGpu').disabled = !comparison?.gpu || tracingMask;
+  syncTemplateButtons();
+  diagnostics();
+}
+
+function syncTemplateButtons() {
+  const blocked = Boolean(templatePending || operation || loadingPhoto);
+  const selected = Boolean($('templateSelect').value);
+  const hasPhoto = Boolean(photoBlob && points);
+  $('templateSelect').disabled = blocked || !templateNames.length;
+  $('templateName').disabled = blocked || !hasPhoto;
+  $('saveTemplate').disabled = blocked || !hasPhoto || !$('templateName').value?.trim();
+  $('openTemplate').disabled = $('removeTemplate').disabled = blocked || !selected || Boolean(maskDraft);
+  $('updateTemplate').disabled = blocked || !selected || !hasPhoto;
+  $('confirmTemplateDelete').disabled = blocked || Boolean(maskDraft);
+  $('templateDelete').hidden = !templateDeleteName;
+}
+
+function showTemplates(selected) {
+  const select = $('templateSelect');
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = templateNames.length ? 'Выберите шаблон' : 'Нет сохранённых шаблонов';
+  const options = templateNames.sort((a, b) => a.localeCompare(b, 'ru')).map(name => {
+    const option = document.createElement('option');
+    option.value = option.textContent = name;
+    return option;
+  });
+  select.replaceChildren(placeholder, ...options);
+  select.value = templateNames.includes(selected) ? selected : '';
+}
+
+function startTemplateRequest(type, name, photoId) {
+  templateDeleteName = null;
+  templatePending = { type, name, photoId, id: ++templateRequestId };
+  $('templateStatus').textContent = 'Подождите…';
+  syncTemplateButtons();
+  return templatePending.id;
+}
+
+async function receiveTemplate(msg) {
+  const job = templatePending;
+  if (!job || msg.requestId !== job.id) return;
+  const selected = $('templateSelect').value;
+  let message = 'Шаблоны сохраняются на этом устройстве.';
+  try {
+    if (msg.type === 'template-list') {
+      templateNames = msg.names;
+      showTemplates(selected);
+    } else if (msg.type === 'template-saved') {
+      if (!templateNames.includes(msg.name)) templateNames.push(msg.name);
+      showTemplates(msg.name);
+      if (job.type === 'template-save') $('templateName').value = '';
+      message = `Шаблон «${msg.name}» сохранён.`;
+    } else if (msg.type === 'template-deleted') {
+      templateNames = templateNames.filter(name => name !== msg.name);
+      showTemplates(selected);
+      message = `Шаблон «${msg.name}» удалён.`;
+    } else if (msg.type === 'template-photo' && loadingPhoto?.id === job.photoId) {
+      const { blob, settings } = unpackTemplate(msg.bytes);
+      if (await loadPhoto(blob, msg.name, job.photoId, settings)) message = `Шаблон «${msg.name}» открыт.`;
+      else if (photoRequest === job.photoId) message = 'Не удалось открыть фото шаблона.';
+    } else if (msg.type === 'template-error') {
+      throw Error(msg.message);
+    }
+  } catch (error) {
+    if (job.photoId) photoError(job.photoId, error.message);
+    message = error.message;
+  } finally {
+    templatePending = null;
+    $('templateStatus').textContent = message;
+    syncButtons();
+  }
+}
+
+function invalidate() {
+  revision++;
+  output = comparison = comparingSetting = null;
+  if (previewSource?.image !== frame?.image) previewSource = null;
+  drawStage();
+  drawCrop();
+  drawDetail();
+  syncButtons();
+}
+
+function requestFrame(nodeId, refresh = false) {
+  clearTimeout(selection.timer);
+  const requestId = ++selection.requestId;
+  selection.pending = true;
+  if (refresh && operation?.type === 'update') operation.frameRequestId = requestId;
+  syncButtons();
+  status('Экспортирую фрейм из Figma…');
+  send({ type: 'get-selection', nodeId, requestId, scale: Number($('quality').value) });
+}
+
+async function receive(event) {
+  const msg = event.data?.pluginMessage;
+  if (typeof msg?.type !== 'string') return;
+  if (msg.type.startsWith('template-')) return receiveTemplate(msg);
+  if (msg.type === 'photo' || msg.type === 'photo-error') {
+    if (!loadingPhoto?.nodeId || msg.requestId !== loadingPhoto.id) return;
+    if (msg.type === 'photo-error') photoError(msg.requestId, msg.message);
+    else await loadPhoto(new Blob([msg.bytes], { type: 'image/png' }), msg.name, msg.requestId);
+    return;
+  }
+  if (msg.type === 'selection-changed') {
+    selectedPhotoId = msg.photoId;
+    const target = msg.nodeId || msg.sourceNodeId || null;
+    if (msg.mockupId) linkedMockupId = msg.mockupId;
+    if (target && selection.nodeId !== target) {
+      selection.nodeId = target;
+      clearTimeout(selection.timer);
+      selection.requestId++;
+      selection.pending = true;
+      if (operation?.frameRequestId) operation = null;
+      if (frame?.nodeId !== target) {
+        if (!msg.mockupId) linkedMockupId = null;
+        frame = null;
+        $('frameName').textContent = 'Загружаю выбранный фрейм…';
+      }
+      invalidate();
+      selection.timer = setTimeout(() => requestFrame(target), 120);
+    } else syncButtons();
+    return;
+  }
+  if (msg.type === 'selection' || msg.type === 'selection-error') {
+    if (msg.requestId !== selection.requestId) return;
+    try {
+      if (msg.type === 'selection-error') throw Error(msg.message);
+      const blob = new Blob([msg.bytes], { type: 'image/png' });
+      const image = await imageFromBlob(blob);
+      if (msg.requestId !== selection.requestId) return;
+      const previousNode = frame?.nodeId;
+      if (previousNode !== msg.nodeId && operation?.type !== 'update') {
+        $('scroll').value = 0;
+        $('scrollVal').textContent = '0%';
+      }
+      const refreshing = operation?.frameRequestId === msg.requestId;
+      const unchanged = refreshing && operation.revision === revision;
+      const { bytes, ...metadata } = msg;
+      frame = { ...metadata, blob, image };
+      selection.nodeId = msg.nodeId;
+      selection.pending = false;
+      $('frameName').textContent = `${msg.name} · ${size(msg.width, msg.height)}${msg.scale < msg.requested ? ' · масштаб ограничен' : ''}`;
+      invalidate();
+      if (unchanged) {
+        operation.revision = revision;
+        await renderAndWrite(operation);
+      } else {
+        if (refreshing) operation = null;
+        status(refreshing ? 'Настройки изменились. Запустите обновление ещё раз.' : 'Фрейм готов к рендеру.');
+      }
+    } catch (error) {
+      if (msg.requestId !== selection.requestId) return;
+      selection.pending = false;
+      if (operation?.frameRequestId === msg.requestId) operation = null;
+      if (!frame) $('frameName').textContent = 'Фрейм не загружен.';
+      status(error.message);
+    }
+    syncButtons();
+  }
+  if ((msg.type === 'write-success' || msg.type === 'write-error') && operation?.writeId === msg.requestId) {
+    if (msg.type === 'write-success') {
+      if (operation.sourceNodeId === frame?.nodeId) linkedMockupId = msg.id;
+      status(msg.update ? 'Мокап обновлён.' : 'Мокап вставлен в Figma.');
+    } else status(msg.message);
+    operation = null;
+    syncButtons();
+  }
+}
+window.addEventListener('message', receive);
+
+function projection(corners) {
+  const [a, b, c, d] = corners;
+  const turns = corners.map((p, i) => {
+    const q = corners[(i + 1) % 4], r = corners[(i + 2) % 4];
+    return (q.x - p.x) * (r.y - q.y) - (q.y - p.y) * (r.x - q.x);
+  });
+  if (turns.some(turn => turn <= 1)) throw Error('Расставьте четыре угла по часовой стрелке от верхнего левого.');
+  const dx1 = b.x - c.x, dx2 = d.x - c.x, dx3 = a.x - b.x + c.x - d.x;
+  const dy1 = b.y - c.y, dy2 = d.y - c.y, dy3 = a.y - b.y + c.y - d.y;
+  const determinant = dx1 * dy2 - dx2 * dy1;
+  const g = (dx3 * dy2 - dx2 * dy3) / determinant;
+  const h = (dx1 * dy3 - dx3 * dy1) / determinant;
+  return [b.x * (1 + g) - a.x, d.x * (1 + h) - a.x, a.x,
+          b.y * (1 + g) - a.y, d.y * (1 + h) - a.y, a.y, g, h, 1];
+}
+
+function inverse([a, b, c, d, e, f, g, h, i]) {
+  return [e*i-f*h, c*h-b*i, b*f-c*e, f*g-d*i, a*i-c*g, c*d-a*f, d*h-e*g, b*g-a*h, a*e-b*d];
+}
+
+function project(matrix, x, y) {
+  const w = matrix[6] * x + matrix[7] * y + matrix[8];
+  return {
+    x: (matrix[0] * x + matrix[1] * y + matrix[2]) / w,
+    y: (matrix[3] * x + matrix[4] * y + matrix[5]) / w,
+  };
+}
+
+function geometryFor(width, height, corners, inset, photo, mask) {
+  const scalePoint = p => ({ x: p.x * width / photo.naturalWidth, y: p.y * height / photo.naturalHeight });
+  const geometry = geometryForCorners(width, height, corners.map(scalePoint), inset, mask?.map(scalePoint));
+  if (!geometry) throw Error('Область экрана вне фотографии.');
+  return geometry;
+}
+
+function geometryForCorners(width, height, corners, inset, mask) {
+  const transform = projection(corners);
+  const screenCorners = [[inset, inset], [1-inset, inset], [1-inset, 1-inset], [inset, 1-inset]]
+    .map(([x, y]) => project(transform, x, y));
+  const boundary = mask ?? screenCorners;
+  const x = Math.max(0, Math.floor(Math.min(...boundary.map(p => p.x))));
+  const y = Math.max(0, Math.floor(Math.min(...boundary.map(p => p.y))));
+  const right = Math.min(width, Math.ceil(Math.max(...boundary.map(p => p.x))));
+  const bottom = Math.min(height, Math.ceil(Math.max(...boundary.map(p => p.y))));
+  if (right <= x || bottom <= y) return null;
+  const matrix = inverse(projection(screenCorners.map(p => ({ x: p.x - x, y: p.y - y }))));
+  return { screenCorners, screenBounds: { x, y, width: right - x, height: bottom - y }, matrix, mask };
+}
+
+function compositeDesign(ctx, design, { screenBounds: { x, y }, mask }) {
+  if (!mask) {
+    ctx.drawImage(design, x, y);
+    return;
+  }
+  ctx.save();
+  try {
+    tracePolygon(ctx, mask);
+    ctx.clip();
+    ctx.drawImage(design, x, y);
+  } finally {
+    ctx.restore();
+  }
+}
+
+function photoCanvas(photo, requestedScale) {
+  const { naturalWidth: width, naturalHeight: height } = photo;
+  let scale = requestedScale;
+  while (scale >= .05) {
+    const canvas = makeCanvas(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+    try {
+      const ctx = canvas.getContext('2d');
+      const x = canvas.width - 1, y = canvas.height - 1;
+      ctx.fillRect(x, y, 1, 1);
+      if (ctx.getImageData(x, y, 1, 1).data[3] === 255) {
+        ctx.clearRect(x, y, 1, 1);
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(photo, 0, 0, canvas.width, canvas.height);
+        return canvas;
+      }
+    } catch (_) {
+      // A backing store of this size is unavailable.
+    }
+    canvas.width = canvas.height = 1;
+    scale = scale > 1 ? Math.max(1, Math.min(Math.ceil(scale) - 1, scale * .75)) : scale * .75;
+  }
+  throw Error('Не удалось создать Canvas для фотографии.');
+}
+
+function sourcePixels(image, spec) {
+  // Include the pixels on either side of fractional crop edges without rescaling.
+  const bounds = pixelBounds(spec);
+  const canvas = pixelCopy(image, bounds);
+  return { canvas, rect: [spec.sx - bounds.x, spec.sy - bounds.y, spec.sw, spec.sh] };
+}
+
+function screenCornerRadii({ sw, sh }, roundness) {
+  // The radius is measured in the screen plane before applying perspective.
+  const radius = (roundness || 0) * Math.min(sw, sh);
+  return [radius / sw, radius / sh];
+}
+
+function withinScreen(u, v, radiusU, radiusV) {
+  if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1)) return false;
+  if (!radiusU) return true;
+  const x = Math.max(0, 1 - Math.min(u, 1 - u) / radiusU);
+  const y = Math.max(0, 1 - Math.min(v, 1 - v) / radiusV);
+  return x * x + y * y <= 1;
+}
+
+function mipLevels(canvas) {
+  const { width, height } = canvas;
+  const pixels = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const alpha = pixels[i + 3] / 255;
+    pixels[i] *= alpha;
+    pixels[i + 1] *= alpha;
+    pixels[i + 2] *= alpha;
+  }
+  const levels = [{ width, height, pixels }];
+  while (levels.length < 1 + Math.ceil(Math.log2(Math.max(width, height)))) {
+    const previous = levels[levels.length - 1];
+    const w = Math.ceil(previous.width / 2), h = Math.ceil(previous.height / 2);
+    const pixels = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const a = (2 * y * previous.width + 2 * x) * 4;
+        const dx = 2*x + 1 < previous.width ? 4 : 0;
+        const dy = 2*y + 1 < previous.height ? previous.width * 4 : 0;
+        for (let channel = 0; channel < 4; channel++) {
+          const p = a + channel, src = previous.pixels;
+          pixels[(y * w + x) * 4 + channel] = (src[p] + src[p + dx] + src[p + dy] + src[p + dx + dy]) / 4;
+        }
+      }
+    }
+    levels.push({ width: w, height: h, pixels });
+  }
+  return levels;
+}
+
+function sampleLevel(level, x, y, factor, weight, sum) {
+  const { width, height, pixels } = level;
+  x = clamp(x / factor - .5, 0, width - 1);
+  y = clamp(y / factor - .5, 0, height - 1);
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const a = (iy * width + ix) * 4;
+  const dx = ix + 1 < width ? 4 : 0, dy = iy + 1 < height ? width * 4 : 0;
+  const wa = weight * (1-fx) * (1-fy), wb = weight * fx * (1-fy);
+  const wc = weight * (1-fx) * fy, wd = weight * fx * fy;
+  for (let c = 0; c < 4; c++) {
+    const i = a + c;
+    sum[c] += pixels[i] * wa + pixels[i + dx] * wb + pixels[i + dy] * wc + pixels[i + dx + dy] * wd;
+  }
+}
+
+function renderCPU(ctx, geometry, source, [radiusU, radiusV] = [0, 0]) {
+  const { width, height } = geometry.screenBounds;
+  const masked = Boolean(geometry.mask);
+  const levels = source.levels ??= mipLevels(source.canvas);
+  const [sx, sy, sw, sh] = source.rect;
+  const [a,b,c,d,e,f,g,h,i] = geometry.matrix;
+  const overlay = makeCanvas(width, height);
+  const overlayCtx = overlay.getContext('2d');
+  const image = overlayCtx.createImageData(width, height);
+  const sum = [0, 0, 0, 0];
+  const edgeSamples = [-.25, .25];
+  for (let row = 0; row < height; row++) {
+    const py = row + .5;
+    for (let col = 0; col < width; col++) {
+      const px = col + .5, w = g*px + h*py + i;
+      const u = (a*px + b*py + c) / w, v = (d*px + e*py + f) / w;
+      const ux = (a-g*u)/w, uy = (b-h*u)/w, vx = (d-g*v)/w, vy = (e-h*v)/w;
+      const extentU = .5*(Math.abs(ux)+Math.abs(uy)), extentV = .5*(Math.abs(vx)+Math.abs(vy));
+      if (masked ? !Number.isFinite(u) || !Number.isFinite(v) :
+          u < -extentU || u > 1+extentU || v < -extentV || v > 1+extentV) continue;
+      let coverage = 1;
+      const nearCorner = radiusU && (u < radiusU + extentU || u > 1 - radiusU - extentU) &&
+        (v < radiusV + extentV || v > 1 - radiusV - extentV);
+      if (!masked && (nearCorner || u < extentU || u > 1-extentU || v < extentV || v > 1-extentV)) {
+        coverage = 0;
+        for (const dy of edgeSamples) {
+          for (const dx of edgeSamples) {
+            const U = u+dx*ux+dy*uy, V = v+dx*vx+dy*vy;
+            if (withinScreen(U, V, radiusU, radiusV)) coverage += .25;
+          }
+        }
+        if (!coverage) continue;
+      }
+      // Estimate the source footprint of this output pixel from the homography's derivatives.
+      const dxX = ux*sw, dxY = vx*sh, dyX = uy*sw, dyY = vy*sh;
+      const lx = Math.hypot(dxX, dxY), ly = Math.hypot(dyX, dyY);
+      const major = Math.max(lx, ly);
+      const minor = Math.abs(dxX*dyY - dxY*dyX) / Math.max(major, 1e-6);
+      // Sample along the longer axis and let the mip level cover each sample's area.
+      const taps = clamp(Math.ceil(major / Math.max(1, minor)), 1, 8);
+      const lod = clamp(Math.log2(Math.max(1, minor, major/taps)), 0, levels.length - 1);
+      const low = Math.floor(lod), high = Math.ceil(lod), blend = lod - low;
+      const stepx = lx >= ly ? dxX : dyX, stepy = lx >= ly ? dxY : dyY;
+      const cx = sx + u*sw, cy = sy + v*sh;
+      sum.fill(0);
+      for (let t = 0; t < taps; t++) {
+        const offset = (t + .5) / taps - .5;
+        const X = clamp(cx + offset*stepx, sx, sx+sw), Y = clamp(cy + offset*stepy, sy, sy+sh);
+        sampleLevel(levels[low], X, Y, 2**low, (1-blend)/taps, sum);
+        if (blend) sampleLevel(levels[high], X, Y, 2**high, blend/taps, sum);
+      }
+      if (!sum[3]) continue;
+      const out = (row * width + col) * 4, alpha = 255 / sum[3];
+      image.data[out] = sum[0] * alpha;
+      image.data[out + 1] = sum[1] * alpha;
+      image.data[out + 2] = sum[2] * alpha;
+      image.data[out + 3] = sum[3] * coverage;
+    }
+  }
+  overlayCtx.putImageData(image, 0, 0);
+  compositeDesign(ctx, overlay, geometry);
+}
+
+const vertexSource = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const fragmentSource = `#version 300 es
+precision highp float;
+uniform sampler2D source;
+uniform mat3 transform;
+uniform vec4 crop;
+uniform vec2 textureSizePx;
+uniform vec2 cornerRadius;
+uniform bool masked;
+uniform float height;
+out vec4 color;
+bool inside(vec2 p) {
+  if (!(all(greaterThanEqual(p, vec2(0))) && all(lessThanEqual(p, vec2(1))))) return false;
+  if (cornerRadius.x == 0.0) return true;
+  vec2 offset = max(vec2(0), 1.0 - min(p, 1.0 - p) / cornerRadius);
+  return dot(offset, offset) <= 1.0;
+}
+void main() {
+  vec3 p = transform * vec3(gl_FragCoord.x, height - gl_FragCoord.y, 1);
+  vec2 uv = p.xy / p.z;
+  vec2 dx = (transform[0].xy - transform[0].z * uv) / p.z;
+  vec2 dy = (transform[1].xy - transform[1].z * uv) / p.z;
+  vec2 extent = (abs(dx) + abs(dy)) * .5;
+  if (masked ? any(isnan(uv)) || any(isinf(uv)) :
+      any(lessThan(uv, -extent)) || any(greaterThan(uv, 1.0 + extent))) discard;
+  float coverage = 1.0;
+  bool nearCorner = cornerRadius.x > 0.0 && all(lessThan(min(uv, 1.0 - uv), cornerRadius + extent));
+  if (!masked && (nearCorner || any(lessThan(uv, extent)) || any(greaterThan(uv, 1.0 - extent)))) {
+    coverage = 0.0;
+    for (int y = 0; y < 2; ++y) {
+      for (int x = 0; x < 2; ++x) {
+        if (inside(uv + (float(x)*.5-.25)*dx + (float(y)*.5-.25)*dy)) coverage += .25;
+      }
+    }
+  }
+  if (coverage == 0.0) discard;
+  dx *= crop.zw;
+  dy *= crop.zw;
+  float lx = length(dx), ly = length(dy);
+  float major = max(lx, ly);
+  float minor = abs(dx.x * dy.y - dx.y * dy.x) / max(major, 1e-6);
+  float taps = clamp(ceil(major / max(1.0, minor)), 1.0, 8.0);
+  float lod = log2(max(1.0, max(minor, major / taps)));
+  vec2 axis = lx >= ly ? dx : dy;
+  vec2 center = crop.xy + uv * crop.zw;
+  vec4 sum = vec4(0);
+  for (int t = 0; t < int(taps); ++t) {
+    vec2 pos = center + ((float(t) + .5) / taps - .5) * axis;
+    sum += textureLod(source, clamp(pos, crop.xy, crop.xy + crop.zw) / textureSizePx, lod);
+  }
+  color = sum * (coverage / taps);
+}`;
+
+function readMaskedDesign(gl, width, height) {
+  // Snapshot the framebuffer before its WebGL canvas is detached or resized.
+  const stride = width * 4;
+  const pixels = new Uint8Array(stride * height);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  const error = gl.getError();
+  if (error !== gl.NO_ERROR || gl.isContextLost()) throw Error(`Не удалось прочитать слой WebGL (код ${error}).`);
+  const canvas = makeCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(width, height);
+  let hasContent = false;
+  for (let y = 0; y < height; y++) {
+    let src = (height - 1 - y) * stride;
+    let dst = y * stride;
+    for (const end = src + stride; src < end; src += 4, dst += 4) {
+      const alpha = pixels[src + 3];
+      if (!alpha) continue;
+      hasContent = true;
+      const unpremultiply = 255 / alpha;
+      image.data[dst] = pixels[src] * unpremultiply;
+      image.data[dst + 1] = pixels[src + 1] * unpremultiply;
+      image.data[dst + 2] = pixels[src + 2] * unpremultiply;
+      image.data[dst + 3] = alpha;
+    }
+  }
+  if (!hasContent) throw Error('WebGL вернул прозрачный слой маски.');
+  ctx.putImageData(image, 0, 0);
+  return canvas;
+}
+
+function renderGPU(ctx, geometry, source, radii) {
+  const { width, height } = geometry.screenBounds;
+  const canvas = makeCanvas(width, height);
+  const gl = canvas.getContext('webgl2', { alpha: true, antialias: false, depth: false, stencil: false, premultipliedAlpha: true });
+  if (!gl) throw Error('Контекст WebGL 2 недоступен.');
+  try {
+    gpuInfo = {
+      maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+      maxBuffer: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+      viewport: Array.from(gl.getParameter(gl.MAX_VIEWPORT_DIMS)),
+    };
+    if (Math.max(source.canvas.width, source.canvas.height) > gpuInfo.maxTexture ||
+        Math.max(width, height) > gpuInfo.maxBuffer || width > gpuInfo.viewport[0] || height > gpuInfo.viewport[1] ||
+        width !== gl.drawingBufferWidth || height !== gl.drawingBufferHeight) {
+      throw Error('Размер области превышает доступный лимит WebGL.');
+    }
+    const program = gl.createProgram();
+    for (const [type, code] of [[gl.VERTEX_SHADER, vertexSource], [gl.FRAGMENT_SHADER, fragmentSource]]) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, code);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(shader));
+      gl.attachShader(program, shader);
+    }
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(program));
+    gl.useProgram(program);
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source.canvas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    const m = geometry.matrix;
+    gl.uniformMatrix3fv(gl.getUniformLocation(program, 'transform'), false, [m[0],m[3],m[6], m[1],m[4],m[7], m[2],m[5],m[8]]);
+    gl.uniform4fv(gl.getUniformLocation(program, 'crop'), source.rect);
+    gl.uniform2f(gl.getUniformLocation(program, 'textureSizePx'), source.canvas.width, source.canvas.height);
+    gl.uniform2fv(gl.getUniformLocation(program, 'cornerRadius'), radii);
+    gl.uniform1i(gl.getUniformLocation(program, 'masked'), geometry.mask ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(program, 'height'), height);
+    gl.viewport(0, 0, width, height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR || gl.isContextLost()) throw Error(`Сбой WebGL (код ${error}).`);
+    const design = geometry.mask ? readMaskedDesign(gl, width, height) : canvas;
+    compositeDesign(ctx, design, geometry);
+  } finally {
+    canvas.width = canvas.height = 1;
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+  }
+}
+
+function makeMockup(input, engine, allowFallback = true) {
+  const scale = input.scale ?? 1;
+  const canvas = photoCanvas(input.photo, scale);
+  const geometry = geometryFor(canvas.width, canvas.height, input.points, input.inset, input.photo, input.mask);
+  const source = sourcePixels(input.image, input.spec);
+  const radii = screenCornerRadii(input.spec, input.roundness);
+  const ctx = canvas.getContext('2d');
+  try {
+    if (engine === 'webgl') {
+      gpuInfo = {};
+      try { renderGPU(ctx, geometry, source, radii); }
+      catch (error) {
+        gpuInfo.error = error.message;
+        if (!allowFallback) throw error;
+        engine = 'cpu';
+      }
+    }
+    if (engine === 'cpu') renderCPU(ctx, geometry, source, radii);
+    const reduced = canvas.width < Math.round(input.photo.naturalWidth * scale) ||
+      canvas.height < Math.round(input.photo.naturalHeight * scale);
+    return { canvas, geometry, engine, reduced, staging: { width: source.canvas.width, height: source.canvas.height } };
+  } finally {
+    source.canvas.width = source.canvas.height = 1;
+  }
+}
+
+function renderInput() {
+  return {
+    photo, points, image: frame.image, spec: activeCrop(),
+    inset: Number($('inset').value) / 100,
+    roundness: Number($('roundness').value) / 100,
+    mask: screenMask,
+    scale: outputScale(photo, points, $('outputScale').value),
+  };
+}
+
+const nextPaint = () => new Promise(resolve => setTimeout(resolve, 40));
+function present(result) {
+  output = result;
+  editingCorners = false;
+  stageDrag = cornerDrag = null;
+  drawStage();
+  drawDetail();
+  syncButtons();
+}
+
+async function renderOnly(compare = false, savePNG = false) {
+  if (!commitMaskDraft()) return;
+  const job = { type: 'render', revision };
+  operation = job;
+  syncButtons();
+  status(compare ? 'Сравниваю рендереры…' : 'Создаю мокап…');
+  try {
+    await nextPaint();
+    if (job.revision !== revision) {
+      if (!selection.pending) status('Настройки изменились. Запустите рендер ещё раз.');
+      return;
+    }
+    const input = renderInput(), engine = $('engine').value;
+    if (compare) {
+      const cpu = makeMockup(input, 'cpu');
+      let gpu;
+      try {
+        gpu = makeMockup(input, 'webgl', false);
+        if (gpu.canvas.width !== cpu.canvas.width || gpu.canvas.height !== cpu.canvas.height) {
+          gpu = null;
+          throw Error('Не хватило памяти для двух PNG одинакового размера.');
+        }
+      }
+      catch (error) { comparingSetting = `C · WebGL недоступен: ${error.message}`; }
+      if (gpu) comparingSetting = 'Canvas и WebGL готовы к выгрузке.';
+      comparison = { cpu, gpu, width: cpu.canvas.width, height: cpu.canvas.height };
+      present(engine === 'webgl' && gpu ? gpu : cpu);
+      status(gpu ? 'Оба PNG готовы.' : 'PNG Canvas готов. Подробности WebGL в диагностике.');
+    } else {
+      present(makeMockup(input, engine));
+      status(engine === output.engine ? 'Мокап готов.' : 'Мокап готов в Canvas. Подробности WebGL в диагностике.');
+      if (savePNG) await download(output.canvas, 'frila-mockup-C.png');
+    }
+  } catch (error) {
+    status(error.message);
+  } finally {
+    if (operation === job) operation = null;
+    syncButtons();
+  }
+}
+
+function canvasBlob(canvas, type = 'image/png', quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(Error('Не удалось закодировать изображение.')), type, quality);
+  });
+}
+
+async function download(image, name) {
+  try {
+    const url = URL.createObjectURL(image instanceof Blob ? image : await canvasBlob(image));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { status(error.message); }
+}
+
+async function encodeTiles(canvas) {
+  const tiles = [];
+  const limit = 4096;
+  for (let y = 0; y < canvas.height; y += limit) {
+    for (let x = 0; x < canvas.width; x += limit) {
+      const width = Math.min(limit, canvas.width - x), height = Math.min(limit, canvas.height - y);
+      const tile = x === 0 && y === 0 && width === canvas.width && height === canvas.height
+        ? canvas : pixelCopy(canvas, { x, y, width, height });
+      const blob = await canvasBlob(tile);
+      if (tile !== canvas) tile.width = tile.height = 1;
+      tiles.push({ x, y, width, height, bytes: new Uint8Array(await blob.arrayBuffer()) });
+    }
+  }
+  return tiles;
+}
+
+async function renderAndWrite(job) {
+  try {
+    status(job.id ? 'Обновляю мокап…' : 'Подготавливаю PNG для Figma…');
+    await nextPaint();
+    if (operation !== job || job.revision !== revision) throw Error('Настройки изменились. Повторите действие.');
+    if (job.id) present(makeMockup(renderInput(), $('engine').value));
+    const canvas = output.canvas;
+    const tiles = await encodeTiles(canvas);
+    if (operation !== job || job.revision !== revision) throw Error('Настройки изменились. Повторите действие.');
+    job.sourceNodeId = frame.nodeId;
+    job.writeId = ++writeRequestId;
+    send({ type: 'write-mockup', requestId: job.writeId, id: job.id, sourceNodeId: job.sourceNodeId,
+          width: canvas.width, height: canvas.height, tiles });
+  } catch (error) {
+    if (operation !== job) return;
+    operation = null;
+    syncButtons();
+    status(error.message);
+  }
+}
+
+function initialPoints(image) {
+  return [[.18, .2], [.82, .2], [.8, .72], [.2, .72]]
+    .map(([x, y]) => ({ x: x * image.naturalWidth, y: y * image.naturalHeight }));
+}
+
+function detectScreen(image) {
+  const scale = Math.min(1, 320 / Math.max(image.naturalWidth, image.naturalHeight));
+  const w = Math.max(1, Math.round(image.naturalWidth * scale)), h = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = makeCanvas(w, h), ctx = canvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const dark = new Uint8Array(w*h), queue = new Int32Array(w*h);
+  for (let p = 0; p < dark.length; p++) {
+    const i = p*4;
+    dark[p] = data[i+3] > 128 && (.213*data[i] + .715*data[i+1] + .072*data[i+2]) < 58;
+  }
+  let best;
+  for (let p = 0; p < dark.length; p++) {
+    if (!dark[p]) continue;
+    queue[0] = p;
+    dark[p] = 0;
+    let count = 1, minX = w, maxX = 0, minY = h, maxY = 0;
+    const corners = [], extremes = [-Infinity, -Infinity, -Infinity, -Infinity];
+    for (let n = 0; n < count; n++) {
+      const current = queue[n], x = current % w, y = Math.floor(current / w);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      [-x-y, x-y, x+y, y-x].forEach((score, i) => {
+        if (score > extremes[i]) { extremes[i] = score; corners[i] = { x: x * image.naturalWidth / w, y: y * image.naturalHeight / h }; }
+      });
+      for (const neighbor of [x ? current-1 : -1, x < w-1 ? current+1 : -1, current-w, current+w]) {
+        if (dark[neighbor]) { dark[neighbor] = 0; queue[count++] = neighbor; }
+      }
+    }
+    const width = maxX - minX, height = maxY - minY;
+    if (minX === 0 || minY === 0 || maxX === w-1 || maxY === h-1 ||
+        width < w*.18 || height < h*.12 || width / height < .7 || width / height > 3.5 ||
+        count < width * height * .45 || maxY > h*.93 || (best && count <= best.count)) continue;
+    try {
+      projection(corners);
+      best = { count, corners };
+    } catch (_) {
+      // A contour with fewer than four distinct corners is not a display candidate.
+    }
+  }
+  return best?.corners;
+}
+
+function beginPhotoLoad(nodeId) {
+  const id = ++photoRequest;
+  loadingPhoto = { id, nodeId };
+  $('photoName').textContent = nodeId ? 'Экспортирую фото из Figma…' : 'Загружаю фото…';
+  syncButtons();
+  return id;
+}
+
+function photoError(id, message) {
+  if (loadingPhoto?.id !== id) return;
+  loadingPhoto = null;
+  $('photoName').textContent = message;
+  syncButtons();
+}
+
+async function loadPhoto(blob, name, id, settings) {
+  let image;
+  try {
+    image = await imageFromBlob(blob);
+  } catch (error) {
+    photoError(id, error.message);
+    return false;
+  }
+  if (loadingPhoto?.id !== id) return false;
+  const fromFigma = Boolean(loadingPhoto.nodeId);
+  loadingPhoto = null;
+  photo = image;
+  photoBlob = blob;
+  const scale = Math.min(420 / photo.naturalWidth, 330 / photo.naturalHeight);
+  stage.width = Math.max(1, Math.round(photo.naturalWidth * scale));
+  stage.height = Math.max(1, Math.round(photo.naturalHeight * scale));
+  stage.style.maxWidth = `${stage.width}px`;
+  const placePoint = ([x, y]) => ({ x: x * photo.naturalWidth, y: y * photo.naturalHeight });
+  points = settings ? settings.corners.map(placePoint) : initialPoints(photo);
+  screenMask = settings?.mask?.map(placePoint);
+  maskDraft = null;
+  if (settings) {
+    $('aspect').value = settings.aspect;
+    $('inset').value = settings.inset;
+    $('insetVal').textContent = $('inset').value + '%';
+  }
+  $('roundness').value = settings?.roundness ?? 0;
+  $('roundnessVal').textContent = $('roundness').value + '%';
+  activeCorner = 0;
+  editingCorners = true;
+  stageDrag = cornerDrag = null;
+  if (fromFigma || settings) $('photo').value = '';
+  const prefix = settings ? 'Шаблон · ' : fromFigma ? 'Из Figma · ' : '';
+  $('photoName').textContent = `${prefix}${name} · ${size(photo.naturalWidth, photo.naturalHeight)} px`;
+  invalidate();
+  status('Проверьте четыре угла экрана.');
+  return true;
+}
+
+async function compactTemplatePhoto(blob, image) {
+  if (blob.size <= 1_000_000) return blob;
+  let canvas;
+  try {
+    canvas = photoCanvas(image, 1);
+    const compact = await canvasBlob(canvas, 'image/webp', .9);
+    return compact.size < blob.size ? compact : blob;
+  } catch (_) {
+    return blob;
+  } finally {
+    if (canvas) canvas.width = canvas.height = 1;
+  }
+}
+
+async function packTemplate(blob, settings) {
+  const header = new TextEncoder().encode(JSON.stringify({ ...settings, mimeType: blob.type }));
+  const bytes = new Uint8Array(4 + header.length + blob.size);
+  new DataView(bytes.buffer).setUint32(0, header.length);
+  bytes.set(header, 4);
+  bytes.set(new Uint8Array(await blob.arrayBuffer()), 4 + header.length);
+  return bytes;
+}
+
+function normalizedVertices(vertices) {
+  return Array.isArray(vertices) && vertices.every(point => Array.isArray(point) && point.length === 2 &&
+    point.every(value => Number.isFinite(value) && value >= 0 && value <= 1));
+}
+
+function unpackTemplate(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 5) throw Error('Шаблон повреждён.');
+  const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0);
+  if (!length || length >= bytes.length - 4) throw Error('Шаблон повреждён.');
+  let settings;
+  try { settings = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(4, 4 + length))); }
+  catch (_) { throw Error('Шаблон повреждён.'); }
+  if (!settings || !normalizedVertices(settings.corners) || settings.corners.length !== 4 ||
+      !Array.from($('aspect').options).some(option => option.value === settings.aspect) ||
+      !Number.isFinite(settings.inset) || settings.inset < 0 || settings.inset > 3 ||
+      (settings.roundness !== undefined &&
+        (!Number.isFinite(settings.roundness) || settings.roundness < 0 || settings.roundness > 25)) ||
+      (settings.mask !== undefined && (!normalizedVertices(settings.mask) || settings.mask.length < 3)) ||
+      typeof settings.mimeType !== 'string') {
+    throw Error('Шаблон повреждён.');
+  }
+  return { blob: new Blob([bytes.subarray(4 + length)], { type: settings.mimeType }), settings };
+}
+
+async function saveTemplate(type, name) {
+  if (!photoBlob || !points || templatePending) return;
+  name = name.trim().normalize('NFC');
+  if (!name) return;
+  if (type === 'template-save' && templateNames.includes(name)) {
+    $('templateStatus').textContent = 'Шаблон с таким названием уже есть.';
+    return;
+  }
+  if (!commitMaskDraft()) {
+    $('templateStatus').textContent = $('maskStatus').textContent;
+    return;
+  }
+  const image = photo, original = photoBlob;
+  const recordPoint = ({ x, y }) => [x / image.naturalWidth, y / image.naturalHeight];
+  const settings = {
+    corners: points.map(recordPoint),
+    aspect: $('aspect').value, inset: Number($('inset').value),
+    roundness: Number($('roundness').value),
+    mask: screenMask?.map(recordPoint),
+  };
+  const requestId = startTemplateRequest(type, name);
+  try {
+    projection(points);
+    const blob = await compactTemplatePhoto(original, image);
+    const bytes = await packTemplate(blob, settings);
+    send({ type, requestId, name, bytes });
+  } catch (error) {
+    await receiveTemplate({ type: 'template-error', requestId, message: error.message });
+  }
+}
+
+$('templatesPanel').ontoggle = () => {
+  if ($('templatesPanel').open && !templatePending) {
+    const type = 'template-list';
+    send({ type, requestId: startTemplateRequest(type) });
+  }
+};
+$('templateSelect').onchange = () => {
+  templateDeleteName = null;
+  syncTemplateButtons();
+};
+$('templateName').oninput = syncTemplateButtons;
+$('templateName').onkeydown = event => {
+  if (event.key === 'Enter' && !$('saveTemplate').disabled && !event.isComposing) {
+    event.preventDefault();
+    $('saveTemplate').click();
+  }
+};
+$('saveTemplate').onclick = () => saveTemplate('template-save', $('templateName').value);
+$('updateTemplate').onclick = () => saveTemplate('template-update', $('templateSelect').value);
+$('openTemplate').onclick = () => {
+  if ($('openTemplate').disabled) return;
+  const type = 'template-open', name = $('templateSelect').value;
+  send({ type, name, requestId: startTemplateRequest(type, name, beginPhotoLoad()) });
+};
+$('removeTemplate').onclick = () => {
+  templateDeleteName = $('templateSelect').value;
+  $('templateDeleteText').textContent = `Удалить шаблон «${templateDeleteName}»?`;
+  syncTemplateButtons();
+};
+$('cancelTemplateDelete').onclick = () => {
+  templateDeleteName = null;
+  syncTemplateButtons();
+};
+$('confirmTemplateDelete').onclick = () => {
+  if (!templateDeleteName || $('confirmTemplateDelete').disabled) return;
+  const type = 'template-delete', name = templateDeleteName;
+  send({ type, name, requestId: startTemplateRequest(type, name) });
+};
+
+$('photo').onchange = event => {
+  const file = event.target.files[0];
+  if (file) return loadPhoto(file, file.name, beginPhotoLoad());
+};
+$('photoFromFigma').onclick = () => {
+  if (!selectedPhotoId) return;
+  const nodeId = selectedPhotoId;
+  send({ type: 'get-photo', requestId: beginPhotoLoad(nodeId), nodeId });
+};
+$('detect').onclick = () => {
+  const found = detectScreen(photo);
+  editingCorners = true;
+  stageDrag = cornerDrag = null;
+  if (found) {
+    points = found;
+    invalidate();
+  } else drawStage();
+  status(found ? 'Экран найден. Проверьте углы.' : 'Экран не найден. Расставьте углы вручную.');
+};
+$('editPoints').onclick = () => {
+  editingCorners = !editingCorners;
+  stageDrag = cornerDrag = null;
+  drawStage();
+};
+
+function updateMaskDraft() {
+  $('maskStatus').textContent = `Точек на контуре: ${maskDraft.length}`;
+  syncButtons();
+  drawStage();
+}
+
+function addMaskPoint({ x, y }) {
+  if (x < 0 || y < 0 || x > photo.naturalWidth || y > photo.naturalHeight) return;
+  const last = maskDraft[maskDraft.length - 1];
+  if (last && distance(last, { x, y }) < .25) return;
+  maskDraft.push({ x, y });
+  updateMaskDraft();
+}
+
+$('traceMask').onclick = () => {
+  if ($('traceMask').disabled) return;
+  maskDraft = [];
+  editingCorners = true;
+  stageDrag = cornerDrag = null;
+  updateMaskDraft();
+};
+$('undoMaskPoint').onclick = () => {
+  if (!maskDraft?.length) return;
+  maskDraft.pop();
+  updateMaskDraft();
+};
+$('cancelMask').onclick = () => {
+  maskDraft = null;
+  syncButtons();
+  drawStage();
+};
+
+function maskError(vertices) {
+  if (vertices.length < 3) return 'Поставьте хотя бы три точки или нажмите «Отмена».';
+  const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  for (let i = 0; i < vertices.length - 2; i++) {
+    const a = vertices[i], b = vertices[i + 1];
+    const end = i === 0 ? vertices.length - 1 : vertices.length;
+    for (let j = i + 2; j < end; j++) {
+      const c = vertices[j], d = vertices[(j + 1) % vertices.length];
+      if (Math.max(a.x, b.x) < Math.min(c.x, d.x) || Math.max(c.x, d.x) < Math.min(a.x, b.x) ||
+          Math.max(a.y, b.y) < Math.min(c.y, d.y) || Math.max(c.y, d.y) < Math.min(a.y, b.y)) continue;
+      if (cross(a, b, c) * cross(a, b, d) <= 0 && cross(c, d, a) * cross(c, d, b) <= 0) {
+        return 'Линии пересекаются. Уберите лишние точки и продолжайте обводку в одном направлении.';
+      }
+    }
+  }
+  const area = vertices.reduce((sum, p, index) => {
+    const q = vertices[(index + 1) % vertices.length];
+    return sum + p.x * q.y - q.x * p.y;
+  }, 0);
+  if (Math.abs(area) < 2) return 'Контур должен охватывать видимую часть экрана.';
+}
+
+function commitMaskDraft() {
+  if (!maskDraft) return true;
+  const last = maskDraft[maskDraft.length - 1];
+  const closesAtStart = maskDraft.length > 1 && distance(maskDraft[0], last) < .25;
+  const vertices = closesAtStart ? maskDraft.slice(0, -1) : maskDraft;
+  const problem = maskError(vertices);
+  if (problem) {
+    $('maskStatus').textContent = problem;
+    status(problem);
+    return false;
+  }
+  screenMask = vertices;
+  maskDraft = null;
+  invalidate();
+  status('Маска экрана применена.');
+  return true;
+}
+
+$('applyMask').onclick = commitMaskDraft;
+$('saveMaskPNG').onclick = () => renderOnly(false, true);
+$('clearMask').onclick = () => {
+  screenMask = null;
+  invalidate();
+};
+
+function pointerPosition(canvas, event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) / rect.width,
+    y: (event.clientY - rect.top) / rect.height,
+    width: rect.width, height: rect.height,
+  };
+}
+
+function moveCorner(index, x, y) {
+  const point = points[index];
+  const nextX = clamp(x, 0, photo.naturalWidth), nextY = clamp(y, 0, photo.naturalHeight);
+  if (Math.abs(nextX - point.x) < 1e-6 && Math.abs(nextY - point.y) < 1e-6) return;
+  points[index] = { x: nextX, y: nextY };
+  invalidate();
+}
+
+stage.onpointerdown = event => {
+  if (!points || (output && !editingCorners) || stageDrag || cornerDrag || event.button !== 0) return;
+  const { x, y, width, height } = pointerPosition(stage, event);
+  if (maskDraft) {
+    addMaskPoint({ x: x * photo.naturalWidth, y: y * photo.naturalHeight });
+    return;
+  }
+  const distances = points.map(p => Math.hypot((p.x / photo.naturalWidth - x)*width, (p.y / photo.naturalHeight - y)*height));
+  const closest = Math.min(...distances);
+  if (closest > 24) return;
+  activeCorner = distances.indexOf(closest);
+  editingCorners = true;
+  stageDrag = { index: activeCorner, pointer: event.pointerId, x, y, point: points[activeCorner] };
+  stage.setPointerCapture(event.pointerId);
+  drawStage();
+  cornerView.focus({ preventScroll: true });
+};
+stage.onpointermove = event => {
+  if (!stageDrag || stageDrag.pointer !== event.pointerId) return;
+  const { x, y } = pointerPosition(stage, event);
+  moveCorner(stageDrag.index,
+    stageDrag.point.x + (x - stageDrag.x) * photo.naturalWidth,
+    stageDrag.point.y + (y - stageDrag.y) * photo.naturalHeight);
+};
+stage.onlostpointercapture = event => {
+  if (stageDrag?.pointer === event.pointerId) stageDrag = null;
+};
+
+function photoPointInLoupe(event, view) {
+  const cursor = pointerPosition(cornerView, event);
+  return {
+    x: view.x + clamp(cursor.x, 0, 1) * cornerView.width / view.scale,
+    y: view.y + clamp(cursor.y, 0, 1) * cornerView.height / view.scale,
+  };
+}
+
+function pointAtCornerPointer(event) {
+  const { x, y } = photoPointInLoupe(event, cornerDrag.view);
+  moveCorner(activeCorner, x, y);
+}
+
+cornerView.onpointerdown = event => {
+  if (!editingCorners || stageDrag || cornerDrag || event.button !== 0) return;
+  if (maskDraft) {
+    addMaskPoint(photoPointInLoupe(event, cornerViewport()));
+    return;
+  }
+  cornerDrag = { pointer: event.pointerId, view: cornerViewport() };
+  cornerView.setPointerCapture(event.pointerId);
+  cornerView.focus({ preventScroll: true });
+  pointAtCornerPointer(event);
+};
+cornerView.onpointermove = event => {
+  if (cornerDrag?.pointer === event.pointerId) pointAtCornerPointer(event);
+};
+cornerView.onlostpointercapture = event => {
+  if (cornerDrag?.pointer !== event.pointerId) return;
+  cornerDrag = null;
+  if (editingCorners) drawStage();
+};
+
+const arrowOffsets = new Map([
+  ['ArrowLeft', [-1, 0]], ['ArrowUp', [0, -1]], ['ArrowRight', [1, 0]], ['ArrowDown', [0, 1]],
+]);
+function nudgeCorner(event) {
+  if (!editingCorners || maskDraft || stageDrag || cornerDrag || event.altKey || event.metaKey || event.ctrlKey) return;
+  const offset = arrowOffsets.get(event.key);
+  if (!offset) return;
+  event.preventDefault();
+  const step = event.shiftKey ? 5 : .25;
+  const point = points[activeCorner];
+  moveCorner(activeCorner, point.x + step * offset[0], point.y + step * offset[1]);
+}
+
+cornerView.onkeydown = nudgeCorner;
+cornerButtons.forEach((button, index) => {
+  button.onclick = () => {
+    if (stageDrag || cornerDrag) return;
+    activeCorner = index;
+    drawStage();
+  };
+  button.onkeydown = nudgeCorner;
+});
+$('cornerZoom').onchange = () => {
+  cornerDrag = null;
+  if (editingCorners) drawStage();
+};
+$('livePreview').onchange = drawStage;
+
+for (const id of ['inset', 'roundness', 'scroll', 'zoom']) {
+  $(id).oninput = () => {
+    $(id + 'Val').textContent = $(id).value + '%';
+    invalidate();
+  };
+}
+for (const id of ['aspect', 'engine', 'outputScale']) $(id).onchange = invalidate;
+for (const id of ['detailSource', 'detailX', 'detailY']) $(id).oninput = drawDetail;
+$('quality').onchange = () => {
+  if (selection.nodeId) {
+    invalidate();
+    requestFrame(selection.nodeId);
+  }
+};
+$('loadFrame').onclick = () => requestFrame(selectedPhotoId ? null : selection.nodeId);
+$('render').onclick = () => renderOnly();
+$('compare').onclick = () => renderOnly(true);
+$('saveA').onclick = () => download(frame.blob, 'frila-mockup-A-figma.png');
+$('saveB').onclick = () => {
+  try { download(pixelCopy(frame.image, pixelBounds(activeCrop())), 'frila-mockup-B-crop.png'); }
+  catch (error) { status(error.message); }
+};
+$('saveC').onclick = () => download(output.canvas, 'frila-mockup-C.png');
+$('save').onclick = () => {
+  if ($('save').disabled) return;
+  return maskDraft || !output ? renderOnly(false, true) : $('saveC').onclick();
+};
+$('saveScreen').onclick = () => download(pixelCopy(output.canvas, output.geometry.screenBounds), 'frila-mockup-C-screen.png');
+$('saveCpu').onclick = () => download(comparison.cpu.canvas, 'frila-mockup-C-canvas.png');
+$('saveGpu').onclick = () => download(comparison.gpu.canvas, 'frila-mockup-C-webgl.png');
+$('insert').onclick = () => {
+  operation = { type: 'insert', revision };
+  syncButtons();
+  renderAndWrite(operation);
+};
+$('update').onclick = () => {
+  if (!commitMaskDraft()) return;
+  operation = { type: 'update', id: linkedMockupId, revision };
+  requestFrame(frame.nodeId, true);
+};
+syncButtons();
+send({ type: 'ready' });
+</script>
+</body>
+</html>
